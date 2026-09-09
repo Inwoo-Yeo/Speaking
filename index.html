@@ -58,11 +58,11 @@ white-space:pre-wrap;margin-bottom:12px;}
   <!-- 로그인 -->
   <div id="loginView" class="card">
     <h1>🎙️ 스피킹 연습</h1>
-    <p class="sub">학번·이름·학급을 입력하고 시작하세요</p>
-    <input id="inStudentId" placeholder="학번 (예: 30101)" inputmode="numeric">
-    <input id="inName" placeholder="이름">
+    <p class="sub">학급·번호·이름·비밀번호를 입력하세요 (처음이면 자동 등록됩니다)</p>
     <input id="inClassId" placeholder="학급 (예: 3-1)">
-    <input id="inPw" type="password" placeholder="비밀번호 (선택)">
+    <input id="inStudentId" placeholder="번호 (예: 1)" inputmode="numeric">
+    <input id="inName" placeholder="이름">
+    <input id="inPw" type="password" placeholder="비밀번호 (필수)">
     <button id="btnLogin" class="primary">시작하기</button>
     <div id="loginMsg" class="msg"></div>
   </div>
@@ -105,7 +105,20 @@ white-space:pre-wrap;margin-bottom:12px;}
 // ★★★ 설정: 아래 GAS_URL을 본인 웹앱 배포 URL로 바꾸세요 ★★★
 // (GAS [배포] > 웹앱 URL, .../exec 로 끝나는 주소)
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzmjABz4fo522CTaOMfCoUWotmuiKQqcrwaJmJGoM7GYUbYaJtJ2eRCKnCAsw4Yt8Ttww/exec';
+
+// ★ 채점 엄격도: 1.0=Azure원점수, 낮출수록 인색.
+//   STRICT_POWER를 1보다 크게 하면 높은 점수는 더 깎이고 낮은 점수는 더 크게 깎임.
+//   예) 0.8곱 + 1.3제곱이면 90점→약 66점, 70점→약 43점 으로 인색해짐.
+const STRICT_MULT = 0.85;   // 전체 배율 (1.0=그대로, 0.85=15% 감점)
+const STRICT_POWER = 1.25;  // 곡선 강도 (1.0=직선, 클수록 낮은점수에 가혹)
 // ========================================================
+
+// Azure 원점수(0~100)를 엄격 점수로 변환
+function strict(v){
+  v = Math.max(0, Math.min(100, v||0));
+  const scaled = Math.pow(v/100, STRICT_POWER) * 100 * STRICT_MULT;
+  return Math.round(Math.max(0, Math.min(100, scaled)));
+}
 
 let ST = { studentId:'', name:'', classId:'', script:null };
 function $(id){ return document.getElementById(id); }
@@ -140,17 +153,17 @@ async function postApi(body){
 
 // ---------- 로그인 ----------
 $('btnLogin').onclick = async ()=>{
-  const sid=$('inStudentId').value.trim(), name=$('inName').value.trim();
-  const cid=$('inClassId').value.trim(), pw=$('inPw').value;
-  if(!sid||!name||!cid){ $('loginMsg').textContent='학번·이름·학급을 모두 입력하세요.'; return; }
+  const cid=$('inClassId').value.trim(), sid=$('inStudentId').value.trim();
+  const name=$('inName').value.trim(), pw=$('inPw').value.trim();
+  if(!cid||!sid||!name||!pw){ $('loginMsg').textContent='학급·번호·이름·비밀번호를 모두 입력하세요.'; return; }
   $('btnLogin').disabled=true; $('loginMsg').textContent='접속 중...';
   try{
-    const login = await jsonp({action:'studentLogin', studentId:sid, name:name, classId:cid, pw:pw||''});
-    if(login.ok===false) throw new Error(login.error);
+    const login = await jsonp({action:'studentLogin', studentId:sid, name:name, classId:cid, pw:pw});
+    if(!login || login.ok===false) throw new Error((login&&login.error)||'로그인 실패');
     const script = await jsonp({action:'getScriptForClass', classId:cid});
-    if(script.ok===false) throw new Error(script.error);
+    if(!script || script.ok===false) throw new Error((script&&script.error)||'스크립트를 찾을 수 없습니다');
     ST = { studentId:sid, name:login.name, classId:cid, script:script };
-    $('whoami').textContent = login.name+' · '+cid;
+    $('whoami').textContent = login.name+' · '+cid+' '+sid+'번';
     $('unitTopic').textContent = script.unit+' — '+script.topic;
     $('referenceText').textContent = script.referenceText;
     hide('loginView'); show('practiceView');
@@ -254,41 +267,48 @@ function blobToBase64(blob){
 
 // ---------- 결과 ----------
 async function handleResult(pa, detailJson, audioB64){
+  // Azure 원점수 -> 엄격 점수로 변환
+  const acc = strict(pa.accuracyScore);
+  const flu = strict(pa.fluencyScore);
+  const comp = strict(pa.completenessScore);
+  const pron = strict(pa.pronunciationScore);
+
   $('scores').innerHTML =
-    scoreChip('종합',pa.pronunciationScore)+scoreChip('정확도',pa.accuracyScore)+
-    scoreChip('유창성',pa.fluencyScore)+scoreChip('완성도',pa.completenessScore);
+    scoreChip('종합',pron)+scoreChip('정확도',acc)+
+    scoreChip('유창성',flu)+scoreChip('완성도',comp);
   $('phonemeView').innerHTML = renderPhonemes(detailJson);
   show('resultBox');
   $('aiFeedback').textContent='🤖 맞춤 피드백 생성 중...';
 
-  // 1) 저장 먼저
+  // 1) 저장 (엄격 점수로 저장 — 교사가 보는 점수와 일치)
   try{
     await postApi({ action:'saveSubmission',
       studentId:ST.studentId,name:ST.name,classId:ST.classId,
       scriptId:ST.script.scriptId,audioBase64:audioB64,
-      accuracyScore:pa.accuracyScore,fluencyScore:pa.fluencyScore,
-      completenessScore:pa.completenessScore,pronScore:pa.pronunciationScore,
+      accuracyScore:acc,fluencyScore:flu,
+      completenessScore:comp,pronScore:pron,
       phonemeDetail:detailJson,aiFeedback:'' });
   }catch(e){ $('recStatus').textContent='저장 실패: '+(e.message||e); }
 
-  // 2) Gemini 피드백
+  // 2) Gemini 피드백 (POST: phonemeDetail이 길어서 JSONP 불가)
   try{
-    const fb = await jsonp({action:'generateAIFeedback',
+    const fb = await postApi({action:'generateAIFeedback',
       referenceText:ST.script.referenceText, phonemeDetail:detailJson, language:ST.script.language});
     $('aiFeedback').textContent = (fb && fb.feedback) || '연습 결과가 저장되었습니다.';
   }catch(e){ $('aiFeedback').textContent='결과가 저장되었습니다.'; }
 }
 function scoreChip(label,val){
-  const v=Math.round(val||0), cls=v>=80?'good':(v>=60?'mid':'low');
+  const v=Math.round(val||0), cls=v>=75?'good':(v>=50?'mid':'low');
   return '<div class="chip '+cls+'"><span>'+label+'</span><b>'+v+'</b></div>';
 }
 function renderPhonemes(detailJson){
   try{
     const j=JSON.parse(detailJson); const words=j.NBest[0].Words||[];
     return words.map(w=>{
-      const s=(w.PronunciationAssessment&&w.PronunciationAssessment.AccuracyScore)||0;
-      const cls=s>=80?'w-good':(s>=60?'w-mid':'w-low');
-      return '<span class="w '+cls+'" title="점수 '+Math.round(s)+'">'+w.Word+'</span>';
+      const raw=(w.PronunciationAssessment&&w.PronunciationAssessment.AccuracyScore)||0;
+      const s=strict(raw); // 글자별 색상도 엄격 기준
+      const cls=s>=75?'w-good':(s>=50?'w-mid':'w-low');
+      return '<span class="w '+cls+'" title="점수 '+s+'">'+w.Word+'</span>';
     }).join('');
   }catch(e){ return ''; }
 }
