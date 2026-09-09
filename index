@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>스피킹 연습</title>
+<script src="https://aka.ms/csspeech/jsbrowserpackageraw"></script>
+<style>
+:root{--bg:#f4f6fb;--card:#fff;--ink:#1f2430;--sub:#6b7280;--primary:#3b5bdb;
+--primary-d:#2f49b0;--line:#e5e7eb;--good:#2f9e44;--mid:#f08c00;--low:#e03131;}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Malgun Gothic','Apple SD Gothic Neo',system-ui,sans-serif;
+background:var(--bg);color:var(--ink);}
+.wrap{max-width:560px;margin:0 auto;padding:20px;}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;
+margin-bottom:16px;box-shadow:0 2px 10px rgba(0,0,0,.04);}
+h1{font-size:22px;margin:0 0 4px;}
+.sub{color:var(--sub);font-size:13px;margin:0 0 16px;}
+input{width:100%;padding:12px;margin:6px 0;border:1px solid var(--line);border-radius:10px;
+font-size:15px;font-family:inherit;}
+button{cursor:pointer;border:none;border-radius:10px;padding:12px 16px;font-size:15px;
+font-weight:600;font-family:inherit;}
+.primary{background:var(--primary);color:#fff;width:100%;margin-top:8px;}
+.primary:hover{background:var(--primary-d);}
+.ghost{background:#eef1f8;color:var(--primary);}
+.record{background:var(--low);color:#fff;width:100%;font-size:17px;padding:18px;}
+.record.recording{background:#2b2f36;animation:pulse 1.2s infinite;}
+@keyframes pulse{50%{opacity:.65}}
+.hidden{display:none!important;}
+.msg{color:var(--sub);font-size:13px;margin-top:8px;min-height:16px;}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;font-weight:600;}
+.topbar .ghost{width:auto;padding:8px 12px;font-size:13px;}
+.script-box{background:#f8f9ff;border:1px solid #e0e6ff;border-radius:12px;padding:18px;margin-bottom:16px;}
+.unit{font-size:13px;color:var(--primary);font-weight:700;margin-bottom:8px;}
+.reference{font-size:24px;line-height:1.6;letter-spacing:.5px;}
+.rec-area{text-align:center;}
+.result{margin-top:18px;border-top:1px dashed var(--line);padding-top:16px;}
+.scores{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+.chip{flex:1;min-width:70px;text-align:center;border-radius:10px;padding:10px 6px;background:#f1f3f5;}
+.chip span{display:block;font-size:11px;color:var(--sub);}
+.chip b{font-size:20px;}
+.chip.good b{color:var(--good);}.chip.mid b{color:var(--mid);}.chip.low b{color:var(--low);}
+.phoneme{font-size:22px;line-height:2;margin-bottom:14px;}
+.w{padding:2px 4px;border-radius:6px;margin:0 1px;}
+.w-good{color:var(--good);}.w-mid{color:var(--mid);background:#fff4e6;}
+.w-low{color:var(--low);background:#ffe3e3;font-weight:700;}
+.ai-fb{background:#f8f9ff;border-radius:12px;padding:16px;font-size:15px;line-height:1.7;
+white-space:pre-wrap;margin-bottom:12px;}
+.hist{border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;}
+.hist-top{font-size:14px;margin-bottom:6px;}
+.hist-ai{font-size:14px;color:#374151;line-height:1.6;}
+.hist-tc{font-size:14px;color:var(--primary);margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 로그인 -->
+  <div id="loginView" class="card">
+    <h1>🎙️ 스피킹 연습</h1>
+    <p class="sub">학번·이름·학급을 입력하고 시작하세요</p>
+    <input id="inStudentId" placeholder="학번 (예: 30101)" inputmode="numeric">
+    <input id="inName" placeholder="이름">
+    <input id="inClassId" placeholder="학급 (예: 3-1)">
+    <input id="inPw" type="password" placeholder="비밀번호 (선택)">
+    <button id="btnLogin" class="primary">시작하기</button>
+    <div id="loginMsg" class="msg"></div>
+  </div>
+
+  <!-- 연습 -->
+  <div id="practiceView" class="card hidden">
+    <div class="topbar">
+      <span id="whoami"></span>
+      <button id="btnHistory" class="ghost">내 기록</button>
+    </div>
+    <div class="script-box">
+      <div class="unit" id="unitTopic"></div>
+      <div class="reference" id="referenceText"></div>
+    </div>
+    <div class="rec-area">
+      <button id="btnRecord" class="record">● 녹음 시작</button>
+      <div id="recStatus" class="msg"></div>
+    </div>
+    <div id="resultBox" class="result hidden">
+      <div class="scores" id="scores"></div>
+      <div class="phoneme" id="phonemeView"></div>
+      <div class="ai-fb" id="aiFeedback"></div>
+      <button id="btnRetry" class="ghost">다시 연습</button>
+    </div>
+  </div>
+
+  <!-- 기록 -->
+  <div id="historyView" class="card hidden">
+    <div class="topbar">
+      <span>📋 내 연습 기록</span>
+      <button id="btnBackPractice" class="ghost">← 돌아가기</button>
+    </div>
+    <div id="historyList"></div>
+  </div>
+
+</div>
+
+<script>
+// ========================================================
+// ★★★ 설정: 아래 GAS_URL을 본인 웹앱 배포 URL로 바꾸세요 ★★★
+// (GAS [배포] > 웹앱 URL, .../exec 로 끝나는 주소)
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbzmjABz4fo522CTaOMfCoUWotmuiKQqcrwaJmJGoM7GYUbYaJtJ2eRCKnCAsw4Yt8Ttww/exec';
+// ========================================================
+
+let ST = { studentId:'', name:'', classId:'', script:null };
+function $(id){ return document.getElementById(id); }
+function show(id){ $(id).classList.remove('hidden'); }
+function hide(id){ $(id).classList.add('hidden'); }
+
+// --- JSONP: 읽기 요청 (토큰/스크립트/로그인/기록) ---
+function jsonp(params){
+  return new Promise((res, rej)=>{
+    const cb = 'cb_' + Math.random().toString(36).slice(2);
+    const timer = setTimeout(()=>{ cleanup(); rej(new Error('요청 시간 초과')); }, 20000);
+    function cleanup(){ clearTimeout(timer); delete window[cb];
+      if(s.parentNode) s.parentNode.removeChild(s); }
+    window[cb] = (data)=>{ cleanup(); res(data); };
+    const qs = Object.keys(params).map(k=>
+      encodeURIComponent(k)+'='+encodeURIComponent(params[k])).join('&');
+    const s = document.createElement('script');
+    s.src = GAS_URL + '?' + qs + '&callback=' + cb;
+    s.onerror = ()=>{ cleanup(); rej(new Error('네트워크 오류')); };
+    document.body.appendChild(s);
+  });
+}
+// --- POST: 저장 요청 (오디오 등 큰 데이터). text/plain으로 preflight 회피 ---
+async function postApi(body){
+  const r = await fetch(GAS_URL, {
+    method:'POST',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify(body)
+  });
+  return r.json();
+}
+
+// ---------- 로그인 ----------
+$('btnLogin').onclick = async ()=>{
+  const sid=$('inStudentId').value.trim(), name=$('inName').value.trim();
+  const cid=$('inClassId').value.trim(), pw=$('inPw').value;
+  if(!sid||!name||!cid){ $('loginMsg').textContent='학번·이름·학급을 모두 입력하세요.'; return; }
+  $('btnLogin').disabled=true; $('loginMsg').textContent='접속 중...';
+  try{
+    const login = await jsonp({action:'studentLogin', studentId:sid, name:name, classId:cid, pw:pw||''});
+    if(login.ok===false) throw new Error(login.error);
+    const script = await jsonp({action:'getScriptForClass', classId:cid});
+    if(script.ok===false) throw new Error(script.error);
+    ST = { studentId:sid, name:login.name, classId:cid, script:script };
+    $('whoami').textContent = login.name+' · '+cid;
+    $('unitTopic').textContent = script.unit+' — '+script.topic;
+    $('referenceText').textContent = script.referenceText;
+    hide('loginView'); show('practiceView');
+  }catch(e){ $('loginMsg').textContent='오류: '+(e.message||e); }
+  finally{ $('btnLogin').disabled=false; }
+};
+
+// ---------- 녹음 (WebAudio → 16kHz WAV) ----------
+let mediaStream=null, audioCtx=null, processor=null, sourceNode=null;
+let pcmChunks=[], recording=false, sampleRate=16000;
+
+$('btnRecord').onclick = async ()=>{
+  if(recording){ await stopAndAssess(); return; }
+  try{
+    mediaStream = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1}});
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)({sampleRate:16000});
+    sampleRate = audioCtx.sampleRate;
+    sourceNode = audioCtx.createMediaStreamSource(mediaStream);
+    processor = audioCtx.createScriptProcessor(4096,1,1);
+    pcmChunks=[];
+    processor.onaudioprocess = (e)=> pcmChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    sourceNode.connect(processor); processor.connect(audioCtx.destination);
+    recording=true;
+    $('btnRecord').textContent='■ 녹음 종료 (다 읽으면 누르세요)';
+    $('btnRecord').classList.add('recording');
+    $('recStatus').textContent='읽는 중...'; hide('resultBox');
+  }catch(e){ $('recStatus').textContent='마이크 오류: '+(e.message||e); }
+};
+
+async function stopAndAssess(){
+  recording=false;
+  $('btnRecord').textContent='● 녹음 시작';
+  $('btnRecord').classList.remove('recording');
+  processor.disconnect(); sourceNode.disconnect();
+  mediaStream.getTracks().forEach(t=>t.stop());
+  await audioCtx.close();
+  const wavBlob = encodeWAV(mergeChunks(pcmChunks), sampleRate);
+  $('recStatus').textContent='발음 분석 중...';
+  await assess(wavBlob);
+}
+function mergeChunks(chunks){
+  let len=0; chunks.forEach(c=>len+=c.length);
+  const out=new Float32Array(len); let o=0;
+  chunks.forEach(c=>{ out.set(c,o); o+=c.length; }); return out;
+}
+function encodeWAV(samples, sr){
+  const buf=new ArrayBuffer(44+samples.length*2), view=new DataView(buf);
+  const w=(off,s)=>{ for(let i=0;i<s.length;i++) view.setUint8(off+i,s.charCodeAt(i)); };
+  w(0,'RIFF'); view.setUint32(4,36+samples.length*2,true); w(8,'WAVE');
+  w(12,'fmt '); view.setUint32(16,16,true); view.setUint16(20,1,true);
+  view.setUint16(22,1,true); view.setUint32(24,sr,true);
+  view.setUint32(28,sr*2,true); view.setUint16(32,2,true); view.setUint16(34,16,true);
+  w(36,'data'); view.setUint32(40,samples.length*2,true);
+  let off=44;
+  for(let i=0;i<samples.length;i++,off+=2){
+    let s=Math.max(-1,Math.min(1,samples[i]));
+    view.setInt16(off, s<0?s*0x8000:s*0x7FFF, true);
+  }
+  return new Blob([view],{type:'audio/wav'});
+}
+
+// ---------- Azure 발음평가 ----------
+async function assess(wavBlob){
+  try{
+    const tok = await jsonp({action:'getAzureToken'});
+    if(tok.ok===false) throw new Error(tok.error);
+    const SDK = SpeechSDK;
+    const speechConfig = SDK.SpeechConfig.fromAuthorizationToken(tok.token, tok.region);
+    speechConfig.speechRecognitionLanguage = ST.script.language;
+
+    const pushStream = SDK.AudioInputStream.createPushStream();
+    pushStream.write(await wavBlob.arrayBuffer());
+    pushStream.close();
+    const audioConfig = SDK.AudioConfig.fromStreamInput(pushStream);
+
+    const paConfig = new SDK.PronunciationAssessmentConfig(
+      ST.script.referenceText,
+      SDK.PronunciationAssessmentGradingSystem.HundredMark,
+      SDK.PronunciationAssessmentGranularity.Phoneme, true);
+    const recognizer = new SDK.SpeechRecognizer(speechConfig, audioConfig);
+    paConfig.applyTo(recognizer);
+
+    recognizer.recognizeOnceAsync(async (result)=>{
+      if(result.reason !== SDK.ResultReason.RecognizedSpeech){
+        $('recStatus').textContent='음성을 인식하지 못했어요. 조용한 곳에서 또박또박 다시 읽어주세요.';
+        recognizer.close(); return;
+      }
+      const pa = SDK.PronunciationAssessmentResult.fromResult(result);
+      const detailJson = result.properties.getProperty(SDK.PropertyId.SpeechServiceResponse_JsonResult);
+      recognizer.close();
+      const b64 = await blobToBase64(wavBlob);
+      $('recStatus').textContent='';
+      await handleResult(pa, detailJson, b64);
+    }, (err)=>{ $('recStatus').textContent='평가 오류: '+err; recognizer.close(); });
+  }catch(e){ $('recStatus').textContent='오류: '+(e.message||e); }
+}
+function blobToBase64(blob){
+  return new Promise(res=>{ const r=new FileReader();
+    r.onloadend=()=>res(r.result.split(',')[1]); r.readAsDataURL(blob); });
+}
+
+// ---------- 결과 ----------
+async function handleResult(pa, detailJson, audioB64){
+  $('scores').innerHTML =
+    scoreChip('종합',pa.pronunciationScore)+scoreChip('정확도',pa.accuracyScore)+
+    scoreChip('유창성',pa.fluencyScore)+scoreChip('완성도',pa.completenessScore);
+  $('phonemeView').innerHTML = renderPhonemes(detailJson);
+  show('resultBox');
+  $('aiFeedback').textContent='🤖 맞춤 피드백 생성 중...';
+
+  // 1) 저장 먼저
+  try{
+    await postApi({ action:'saveSubmission',
+      studentId:ST.studentId,name:ST.name,classId:ST.classId,
+      scriptId:ST.script.scriptId,audioBase64:audioB64,
+      accuracyScore:pa.accuracyScore,fluencyScore:pa.fluencyScore,
+      completenessScore:pa.completenessScore,pronScore:pa.pronunciationScore,
+      phonemeDetail:detailJson,aiFeedback:'' });
+  }catch(e){ $('recStatus').textContent='저장 실패: '+(e.message||e); }
+
+  // 2) Gemini 피드백
+  try{
+    const fb = await jsonp({action:'generateAIFeedback',
+      referenceText:ST.script.referenceText, phonemeDetail:detailJson, language:ST.script.language});
+    $('aiFeedback').textContent = (fb && fb.feedback) || '연습 결과가 저장되었습니다.';
+  }catch(e){ $('aiFeedback').textContent='결과가 저장되었습니다.'; }
+}
+function scoreChip(label,val){
+  const v=Math.round(val||0), cls=v>=80?'good':(v>=60?'mid':'low');
+  return '<div class="chip '+cls+'"><span>'+label+'</span><b>'+v+'</b></div>';
+}
+function renderPhonemes(detailJson){
+  try{
+    const j=JSON.parse(detailJson); const words=j.NBest[0].Words||[];
+    return words.map(w=>{
+      const s=(w.PronunciationAssessment&&w.PronunciationAssessment.AccuracyScore)||0;
+      const cls=s>=80?'w-good':(s>=60?'w-mid':'w-low');
+      return '<span class="w '+cls+'" title="점수 '+Math.round(s)+'">'+w.Word+'</span>';
+    }).join('');
+  }catch(e){ return ''; }
+}
+$('btnRetry').onclick=()=>{ hide('resultBox'); $('recStatus').textContent=''; };
+
+// ---------- 기록 ----------
+$('btnHistory').onclick=async ()=>{
+  hide('practiceView'); show('historyView');
+  $('historyList').innerHTML='불러오는 중...';
+  const list=await jsonp({action:'getMySubmissions', studentId:ST.studentId});
+  if(!Array.isArray(list) || !list.length){
+    $('historyList').innerHTML='<p class="sub">아직 연습 기록이 없어요.</p>'; return; }
+  $('historyList').innerHTML=list.map(x=>
+    '<div class="hist"><div class="hist-top"><b>'+x.timestamp+'</b> · 종합 '
+    +Math.round(x.pronScore||0)+'점</div>'
+    +'<div class="hist-ai">🤖 '+(x.aiFeedback||'-')+'</div>'
+    +(x.teacherFeedback?'<div class="hist-tc">👩‍🏫 선생님: '+x.teacherFeedback+'</div>':'')
+    +'</div>').join('');
+};
+$('btnBackPractice').onclick=()=>{ hide('historyView'); show('practiceView'); };
+</script>
+</body>
+</html>
